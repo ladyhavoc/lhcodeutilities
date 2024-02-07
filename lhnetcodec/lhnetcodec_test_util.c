@@ -23,6 +23,10 @@ THE SOFTWARE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+#define LHNETCODEC_ENABLE_ADAPTIVECODER 1
+#define LHNETCODEC_ENABLE_BLOCKCODER 1
+
 #include "lhnetcodec.h"
 
 int findflag(int argc, char** argv, const char* flagname, int minargs, int maxargs, int *value, int defaultvalue, char const **strvalue, const char *defaultstringvalue)
@@ -72,43 +76,62 @@ int refillbuffer(FILE* file, unsigned char* buffer, size_t* bufferused, size_t b
 	return (int)r;
 }
 
+void printusage(int argc, char** argv)
+{
+	printf(
+		"usage: %s command [-flags]\n"
+		"about: a tool by LadyHavoc to test lhnetcodec.h\n"
+		"flags:\n"
+		"-v 1 - verbose messages\n"
+		"-v 2 - verbose messages, show context histogram\n"
+		"-contextlength # - set the number of context bits to encode with/decode with\n"
+		"-pbase # - set the probability_base value for the AdaptiveCoder\n"
+		"-pstep # - set the probability_step value for the AdaptiveCoder\n"
+		"-plimit # - set the probability_limit value for the AdaptiveCoder\n"
+		"-pshift # - set the probability_shift value for the AdaptiveCoder\n"
+		"-infile abc - set the input file, use - for stdin, otherwise a test string is used\n"
+		"-outfile abc - set the output file, use - for stdout, otherwise only stats are printed\n"
+		"- encode_ac - encode file using AdaptiveCoder\n"
+		"- decode_ac - decode file using AdaptiveCoder\n"
+		"- encode_bc - encode file using BlockCoder\n"
+		"- decode_bc - decode file using BlockCoder\n"
+		"- encode_bcfp - encode file using BlockCoderFixedPoint\n"
+		"- decode_bcfp - decode file using BlockCoderFixedPoint\n"
+		, argv[0] ? argv[0] : "lhnetcodec_test_util"
+	);
+}
+
 int main(int argc, char** argv)
 {
 	if (argc == 1)
 	{
-		printf(
-			"usage: %s command [-flags]\n"
-			"about: a tool by LadyHavoc to test lhnetcodec.h\n"
-			"flags:\n"
-			"-contextbits # - set the number of context bits to encode with/decode with\n"
-			"-infile abc - set the input file, use - for stdin, otherwise a test string is used\n"
-			"-outfile abc - set the output file, use - for stdout, otherwise only stats are printed\n"
-			"- encode_ac [-contextbits #] - encode file using adaptive coder\n"
-			"- decode_ac [-contextbits #] - decode file using adaptive coder\n"
-			"- encode_bc [-contextbits #] - encode file using block coder\n"
-			"- decode_bc - decode file using block coder\n"
-			, argv[0] ? argv[0] : "lhnetcodec_test_util"
-		);
+		printusage(argc, argv);
 		return 0;
 	}
-	int verbose;if (findflag(argc, argv, "-v", 1, 1, &verbose, 2, NULL, NULL) < 0) return -1;
-	int contextbits;if (findflag(argc, argv, "-contextbits", 1, 1, &contextbits, -1, NULL, NULL) < 0) return -1;
+	int verbose; if (findflag(argc, argv, "-v", 1, 1, &verbose, 2, NULL, NULL) < 0) return -1;
+	int contextlength; if (findflag(argc, argv, "-contextlength", 1, 1, &contextlength, -1, NULL, NULL) < 0) return -1;
+	int probability_base; if (findflag(argc, argv, "-pbase", 1, 1, &probability_base, LHNETCODEC_ADAPTIVECODER_DEFAULT_PROBABILITY_BASE, NULL, NULL) < 0) return -1;
+	int probability_step; if (findflag(argc, argv, "-pstep", 1, 1, &probability_step, LHNETCODEC_ADAPTIVECODER_DEFAULT_PROBABILITY_STEP, NULL, NULL) < 0) return -1;
+	int probability_limit; if (findflag(argc, argv, "-plimit", 1, 1, &probability_limit, LHNETCODEC_ADAPTIVECODER_DEFAULT_PROBABILITY_LIMIT, NULL, NULL) < 0) return -1;
+	int probability_shift; if (findflag(argc, argv, "-pshift", 1, 1, &probability_shift, LHNETCODEC_ADAPTIVECODER_DEFAULT_PROBABILITY_SHIFT, NULL, NULL) < 0) return -1;
 	int write_versioned_magic_number; if (findflag(argc, argv, "-use_magic", 1, 1, &write_versioned_magic_number, 1, NULL, NULL) < 0) return -1;
-	const char* infilename;if (findflag(argc, argv, "-infile", 1, 1, NULL, 0, &infilename, "") < 0) return -1;
-	const char* outfilename;if (findflag(argc, argv, "-outfile", 1, 1, NULL, 0, &outfilename, "") < 0) return -1;
+	const char* infilename; if (findflag(argc, argv, "-infile", 1, 1, NULL, 0, &infilename, "") < 0) return -1;
+	const char* outfilename; if (findflag(argc, argv, "-outfile", 1, 1, NULL, 0, &outfilename, "") < 0) return -1;
 	FILE* infile = infilename[0] != 0 ? (!strcmp(infilename, "-") ? stdin : fopen(infilename, "rb")) : NULL;
 	FILE* outfile = outfilename[0] != 0 ? (!strcmp(outfilename, "-") ? stdout : fopen(outfilename, "wb")) : NULL;
-	unsigned char textbuffer[65536];
-	unsigned char codedbuffer[65536];
-	const char* testtext = "TEST TEST The quick brown fox jumps over the lazy dog\nHello World!\nTEST TEST The quick brown fox jumps over the lazy dog\nHello World!\n";
+	static unsigned char textbuffer[65536];
+	static unsigned char codedbuffer[65536];
+	const char* testtext = "TEST TEST The quick brown fox jumps over the lazy dog\nHello World!\nTEST TEST The quick brown fox jumps over the lazy dog\nHello World!\nTEST TEST The quick brown fox jumps over the lazy dog\nHello World!\nTEST TEST The quick brown fox jumps over the lazy dog\nHello World!\n";
 	memcpy(textbuffer, testtext, strlen(testtext));
 	size_t textbufferlength = strlen(testtext);
 	size_t codedbufferlength = 0;
-	if (contextbits == -1 && (!strcmp(argv[1], "encode_ac") || !strcmp(argv[1], "decode_ac")))
-		contextbits = LHNETCODEC_ADAPTIVECODER_DEFAULTCONTEXTBITS;
-	if (contextbits == -1 && (!strcmp(argv[1], "encode_bc") || !strcmp(argv[1], "decode_bc")))
-		contextbits = LHNETCODEC_BLOCKCODER_DEFAULTCONTEXTBITS;
-	if (infile && (!strcmp(argv[1], "encode_ac") || !strcmp(argv[1], "encode_bc")))
+	if (contextlength == -1 && (!strcmp(argv[1], "encode_ac") || !strcmp(argv[1], "decode_ac")))
+		contextlength = LHNETCODEC_ADAPTIVECODER_DEFAULT_CONTEXTLENGTH;
+	if (contextlength == -1 && (!strcmp(argv[1], "encode_bc") || !strcmp(argv[1], "decode_bc")))
+		contextlength = LHNETCODEC_BLOCKCODER_DEFAULT_CONTEXTLENGTH;
+	if (contextlength == -1 && (!strcmp(argv[1], "encode_bcfp") || !strcmp(argv[1], "decode_bcfp")))
+		contextlength = LHNETCODEC_BLOCKCODER_DEFAULT_CONTEXTLENGTH;
+	if (infile && (!strcmp(argv[1], "encode_ac") || !strcmp(argv[1], "encode_bc") || !strcmp(argv[1], "encode_bcfp")))
 	{
 		textbufferlength = 0;
 		for (;;)
@@ -125,7 +148,7 @@ int main(int argc, char** argv)
 				break;
 		}
 	}
-	if (infile && (!strcmp(argv[1], "decode_ac") || !strcmp(argv[1], "decode_bc")))
+	if (infile && (!strcmp(argv[1], "decode_ac") || !strcmp(argv[1], "decode_bc") || !strcmp(argv[1], "decode_bcfp")))
 	{
 		codedbufferlength = 0;
 		for (;;)
@@ -145,12 +168,15 @@ int main(int argc, char** argv)
 	if (!strcmp(argv[1], "encode_ac"))
 	{
 		unsigned int p;
-		LHNETCODEC_AdaptiveCoder_State state;
-		LHNETCODEC_AdaptiveCoder_Encode_Begin(&state, codedbuffer, sizeof(codedbuffer), 0, contextbits);
+		static LHNETCODEC_AdaptiveCoder_State state;
+		LHNETCODEC_AdaptiveCoder_Encode_Begin(
+			&state, codedbuffer, sizeof(codedbuffer), contextlength,
+			probability_base, probability_step, probability_limit,
+			probability_shift);
 		for (p = 0; p < textbufferlength; p++)
 		{
 			uint64_t number = textbuffer[p];
-			LHNETCODEC_AdaptiveCoder_Encode_Number(&state, number, 8);
+			LHNETCODEC_AdaptiveCoder_Encode_Number(&state, 0, 8, number);
 		}
 		LHNETCODEC_enum status = LHNETCODEC_AdaptiveCoder_Encode_Flush(&state);
 		if (status != LHNETCODEC_STATUS_OK)
@@ -164,45 +190,52 @@ int main(int argc, char** argv)
 				"AdaptiveCoder stats:\n"
 				"bytes in: %u\n"
 				"cursor: %u\n"
-				"contextbits: %u\n"
+				"contextlength: %u\n"
 				, (unsigned int)textbufferlength
-				, (unsigned int)state.coded_cursor
-				, (unsigned int)state.context_bits
+				, (unsigned int)state.coded_cursor_trimmed
+				, (unsigned int)state.contextlength
 			);
 			if (verbose > 1)
 			{
 				fprintf(stderr, "histogram:\n");
-				unsigned int context;
-				unsigned int contextsize = 1u << state.context_bits;
 				char s[256];
-				for (context = 0; context < contextsize; context++)
+				unsigned int context;
+				unsigned int contextsize = 1u << state.contextlength;
+				unsigned int position;
+				const unsigned char* h = state.histogram;
+				for (position = 0; position < LHNETCODEC_MAXCONTEXTRANGE; position++)
 				{
-					unsigned int bit;
-					unsigned int p = 0;
-					s[p++] = '0';
-					s[p++] = 'b';
-					for (bit = contextsize >> 1; bit; bit >>= 1)
-						s[p++] = '0' + ((context & bit) ? 1 : 0);
-					s[p] = 0;
-					fprintf(stderr, "%s %i %i\n", s, state.histogram[context * 2], state.histogram[context * 2 + 1]);
+					for (context = 0; context < contextsize; context++, h += 2)
+					{
+						if (h[0] + h[1] == 0)
+							continue;
+						unsigned int bit;
+						unsigned int p = 0;
+						s[p++] = '0';
+						s[p++] = 'b';
+						for (bit = contextsize >> 1; bit; bit >>= 1)
+							s[p++] = '0' + ((context & bit) ? 1 : 0);
+						s[p] = 0;
+						fprintf(stderr, "%i:%s %i %i\n", position, s, h[0], h[1]);
+					}
 				}
 			}
 		}
 	}
-	if (!strcmp(argv[1], "decode_ac"))
+	else if (!strcmp(argv[1], "decode_ac"))
 	{
 		return 1;
 	}
-	if (!strcmp(argv[1], "encode_bc"))
+	else if (!strcmp(argv[1], "encode_bc"))
 	{
 		unsigned int p;
 		LHNETCODEC_enum version = LHNETCODEC_BLOCKCODER_VERSION_0;
-		LHNETCODEC_BlockCoder_Encode_State state;
-		LHNETCODEC_BlockCoder_Encode_Init(&state, codedbuffer, sizeof(codedbuffer), version, 1, contextbits);
+		static LHNETCODEC_BlockCoder_Encode_State state;
+		LHNETCODEC_BlockCoder_Encode_Init(&state, codedbuffer, sizeof(codedbuffer), version, 1, contextlength);
 		for (p = 0; p < textbufferlength; p++)
 		{
 			uint64_t number = textbuffer[p];
-			LHNETCODEC_BlockCoder_Encode_Number(&state, number, 8);
+			LHNETCODEC_BlockCoder_Encode_Number(&state, 0, 8, number);
 		}
 		uint64_t coded_length = 0;
 		LHNETCODEC_enum status = LHNETCODEC_BlockCoder_Encode_Finish(&state, NULL, &coded_length);
@@ -213,46 +246,148 @@ int main(int argc, char** argv)
 		}
 		if (verbose > 0)
 		{
-			LHNETCODEC_BlockCoder_Decode_State dstate;
+			static LHNETCODEC_BlockCoder_Decode_State dstate;
 			LHNETCODEC_BlockCoder_Decode_Init(&dstate, codedbuffer, (unsigned int)coded_length, version, write_versioned_magic_number);
+			for (p = 0; p < textbufferlength; p++)
+				LHNETCODEC_BlockCoder_Decode_Number(&dstate, 0, 8);
 			fprintf(stderr,
 				"BlockCoder stats:\n"
 				"bytes in: %u\n"
 				"cursor: %u\n"
-				"contextbits: %u\n"
+				"contextlength: %u\n"
 				"store_magic_number: %u\n"
 				"version: %u\n"
 				"header length: %u\n"
 				, (unsigned int)textbufferlength
-				, (unsigned int)dstate.coded_maxbytes
-				, (unsigned int)dstate.context_bits
+				, (unsigned int)coded_length
+				, (unsigned int)dstate.contextlength
 				, (unsigned int)dstate.coded_store_magic_number
 				, (unsigned int)dstate.coded_version
 				, (unsigned int)dstate.coded_header_length
 			);
 			if (verbose > 1)
 			{
-				fprintf(stderr, "histogram:\n");
-				unsigned int context;
-				unsigned int contextsize = 1u << dstate.context_bits;
-				char s[256];
-				for (context = 0; context < contextsize; context++)
+				// we need to build the histogram again if we want to print it
+				static LHNETCODEC_BlockCoder_Encode_State hstate;
+				LHNETCODEC_BlockCoder_Encode_Init(&hstate, codedbuffer, sizeof(codedbuffer), version, 1, contextlength);
+				for (p = 0; p < textbufferlength; p++)
 				{
-					unsigned int bit;
-					unsigned int p = 0;
-					s[p++] = '0';
-					s[p++] = 'b';
-					for (bit = contextsize >> 1; bit; bit >>= 1)
-						s[p++] = '0' + ((context & bit) ? 1 : 0);
-					s[p] = 0;
-					fprintf(stderr, "%s %i %i\n", s, dstate.histogram[context * 2], dstate.histogram[context * 2 + 1]);
+					uint64_t number = textbuffer[p];
+					LHNETCODEC_BlockCoder_Encode_Number(&hstate, 0, 8, number);
+				}
+				LHNETCODEC_BlockCoder_GenerateHistogram(&hstate);
+				fprintf(stderr, "histogram:\n");
+				char s[256];
+				unsigned int context;
+				unsigned int contextsize = 1u << hstate.contextlength;
+				unsigned int position;
+				const unsigned int* h = hstate.histogram;
+				for (position = 0; position < LHNETCODEC_MAXCONTEXTRANGE; position++)
+				{
+					for (context = 0; context < contextsize; context++, h += 2)
+					{
+						if (h[0] + h[1] == 0)
+							continue;
+						unsigned int bit;
+						unsigned int p = 0;
+						s[p++] = '0';
+						s[p++] = 'b';
+						for (bit = contextsize >> 1; bit; bit >>= 1)
+							s[p++] = '0' + ((context & bit) ? 1 : 0);
+						s[p] = 0;
+						fprintf(stderr, "%i:%s %i %i\n", position, s, h[0], h[1]);
+					}
 				}
 			}
 		}
 	}
-	if (!strcmp(argv[1], "decode_bc"))
+	else if (!strcmp(argv[1], "decode_bc"))
 	{
 		return 1;
+	}
+	else if (!strcmp(argv[1], "encode_bcfp"))
+	{
+		unsigned int p;
+		LHNETCODEC_enum version = LHNETCODEC_BLOCKCODERFIXEDPOINT_VERSION_0;
+		static LHNETCODEC_BlockCoderFixedPoint_Encode_State state;
+		LHNETCODEC_BlockCoderFixedPoint_Encode_Init(&state, codedbuffer, sizeof(codedbuffer), version, 1, contextlength);
+		for (p = 0; p < textbufferlength; p++)
+		{
+			uint64_t number = textbuffer[p];
+			LHNETCODEC_BlockCoderFixedPoint_Encode_Number(&state, 0, 8, number);
+		}
+		uint64_t coded_length = 0;
+		LHNETCODEC_enum status = LHNETCODEC_BlockCoderFixedPoint_Encode_Finish(&state, NULL, &coded_length);
+		if (status != LHNETCODEC_STATUS_OK)
+		{
+			fprintf(stderr, "LHNETCODEC_BlockCoderFixedPoint_Encode_Flush returned %i", (int)status);
+			return -1;
+		}
+		if (verbose > 0)
+		{
+			static LHNETCODEC_BlockCoderFixedPoint_Decode_State dstate;
+			LHNETCODEC_BlockCoderFixedPoint_Decode_Init(&dstate, codedbuffer, (unsigned int)coded_length, version, write_versioned_magic_number);
+			for (p = 0; p < textbufferlength; p++)
+				LHNETCODEC_BlockCoderFixedPoint_Decode_Number(&dstate, 0, 8);
+			fprintf(stderr,
+				"BlockCoderFixedPoint stats:\n"
+				"bytes in: %u\n"
+				"cursor: %u\n"
+				"contextlength: %u\n"
+				"store_magic_number: %u\n"
+				"version: %u\n"
+				"header length: %u\n"
+				, (unsigned int)textbufferlength
+				, (unsigned int)coded_length
+				, (unsigned int)dstate.contextlength
+				, (unsigned int)dstate.coded_store_magic_number
+				, (unsigned int)dstate.coded_version
+				, (unsigned int)dstate.coded_header_length
+			);
+			if (verbose > 1)
+			{
+				// we need to build the histogram again if we want to print it
+				static LHNETCODEC_BlockCoderFixedPoint_Encode_State hstate;
+				LHNETCODEC_BlockCoderFixedPoint_Encode_Init(&hstate, codedbuffer, sizeof(codedbuffer), version, 1, contextlength);
+				for (p = 0; p < textbufferlength; p++)
+				{
+					uint64_t number = textbuffer[p];
+					LHNETCODEC_BlockCoderFixedPoint_Encode_Number(&hstate, 0, 8, number);
+				}
+				LHNETCODEC_BlockCoderFixedPoint_GenerateHistogram(&hstate);
+				fprintf(stderr, "histogram:\n");
+				char s[256];
+				unsigned int context;
+				unsigned int contextsize = 1u << hstate.contextlength;
+				unsigned int position;
+				const unsigned int* h = hstate.histogram;
+				for (position = 0; position < LHNETCODEC_MAXCONTEXTRANGE; position++)
+				{
+					for (context = 0; context < contextsize; context++, h += 2)
+					{
+						if (h[0] + h[1] == 0)
+							continue;
+						unsigned int bit;
+						unsigned int p = 0;
+						s[p++] = '0';
+						s[p++] = 'b';
+						for (bit = contextsize >> 1; bit; bit >>= 1)
+							s[p++] = '0' + ((context & bit) ? 1 : 0);
+						s[p] = 0;
+						fprintf(stderr, "%i:%s %i %i\n", position, s, h[0], h[1]);
+					}
+				}
+			}
+		}
+	}
+	else if (!strcmp(argv[1], "decode_bcfp"))
+	{
+		return 1;
+	}
+	else
+	{
+		printusage(argc, argv);
+		return -1;
 	}
 	return 0;
 }
